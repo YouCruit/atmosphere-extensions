@@ -269,6 +269,7 @@
     </profiles>
     <modules>
         <module>rabbitmq/modules</module>
+	<module>rabbitmq-ng/modules</module>
         <module>cdi/modules</module>
         <module>guice/modules</module>
         <module>spring/modules</module>
