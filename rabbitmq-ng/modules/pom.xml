@@ -7,7 +7,6 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
-    <groupId>org.atmosphere</groupId>
     <artifactId>atmosphere-rabbitmq-ng</artifactId>
     <packaging>bundle</packaging>
     <version>2.5.0-SNAPSHOT</version>
@@ -54,7 +53,7 @@
         <dependency>
           <groupId>com.rabbitmq</groupId>
           <artifactId>amqp-client</artifactId>
-          <version>3.6.0</version>
+          <version>4.1.0</version>
         </dependency>
         <dependency>
             <groupId>javax.servlet</groupId>
@@ -62,5 +61,10 @@
             <version>${servlet-version}</version>
             <scope>provided</scope>
         </dependency>
+	<dependency>
+	    <groupId>be.olsson.bencoder</groupId>
+	    <artifactId>bencoder</artifactId>
+	    <version>0.14</version>
+	</dependency>
     </dependencies>
 </project>
