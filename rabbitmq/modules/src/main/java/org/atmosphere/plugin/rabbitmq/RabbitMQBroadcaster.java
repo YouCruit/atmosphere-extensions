@@ -39,7 +39,7 @@ import java.io.IOException;
  * @author Thibault Normand
  * @author Jean-Francois Arcand
  */
-public class RabbitMQBroadcaster extends SimpleBroadcaster implements ShutdownListener {
+public class RabbitMQBroadcaster extends SimpleBroadcaster {
 
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQBroadcaster.class);
 
@@ -62,7 +62,6 @@ public class RabbitMQBroadcaster extends SimpleBroadcaster implements ShutdownLi
     public void init(AtmosphereConfig config) {
         factory = RabbitMQConnectionFactory.getFactory(config);
         channel = factory.channel();
-        channel.addShutdownListener(this);
 
         exchangeName = factory.exchangeName();
         restartConsumer();
@@ -180,10 +179,5 @@ public class RabbitMQBroadcaster extends SimpleBroadcaster implements ShutdownLi
         } catch (Exception ex) {
             logger.trace("", ex);
         }
-    }
-
-    @Override
-    public void shutdownCompleted(ShutdownSignalException cause) {
-        this.destroy();
     }
 }

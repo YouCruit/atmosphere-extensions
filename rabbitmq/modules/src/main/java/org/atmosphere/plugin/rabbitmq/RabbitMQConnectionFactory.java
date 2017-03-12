@@ -34,7 +34,7 @@ import java.util.concurrent.TimeoutException;
  * @author Thibault Normand
  * @author Jean-Francois Arcand
  */
-public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook, ShutdownListener{
+public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook, ShutdownListener {
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQBroadcaster.class);
 
     private static RabbitMQConnectionFactory factory;
@@ -52,7 +52,6 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
     private Connection connection;
     private Channel channel;
     private String exchange;
-    private volatile boolean shutdown;
 
     private String host;
     private String vhost;
@@ -63,13 +62,7 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
 
     public RabbitMQConnectionFactory(AtmosphereConfig config) {
 
-	shutdown = true;
-        String s = config.getInitParameter(PARAM_EXCHANGE_TYPE);
-        if (s != null) {
-            exchange = s;
-        } else {
-            exchange = "topic";
-        }
+        exchange = config.getInitParameter(PARAM_EXCHANGE_TYPE, "topic");
 
         host = config.getInitParameter(PARAM_HOST);
         if (host == null) {
@@ -90,10 +83,10 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
 
         port = config.getInitParameter(PARAM_PORT);
         if (port == null) {
-            if(useSsl){
-        	port = "5671";
-            }else{
-        	port = "5672";
+            if (useSsl) {
+                port = "5671";
+            } else {
+                port = "5672";
             }
         }
 
@@ -101,45 +94,35 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
         if (password == null) {
             password = "guest";
         }
-        
+
 
         exchangeName = "atmosphere." + exchange;
-        reInit();
         config.shutdownHook(this);
-    }
 
-    private void reInit() throws RuntimeException {
-	if(shutdown){
-	    synchronized(RabbitMQConnectionFactory.class){
-		if(shutdown){
-		    try {
-			logger.debug("Create Connection Factory");
-			connectionFactory = new ConnectionFactory();
-			connectionFactory.setUsername(user);
-			connectionFactory.setPassword(password);
-			connectionFactory.setVirtualHost(vhost);
-			connectionFactory.setHost(host);
-			connectionFactory.setPort(Integer.valueOf(port));
-			if(useSsl){
-			    connectionFactory.useSslProtocol();
-			}
+        try {
+            logger.debug("Create Connection Factory");
+            connectionFactory = new ConnectionFactory();
+            connectionFactory.setUsername(user);
+            connectionFactory.setPassword(password);
+            connectionFactory.setVirtualHost(vhost);
+            connectionFactory.setHost(host);
+            connectionFactory.setPort(Integer.valueOf(port));
+            if (useSsl) {
+                connectionFactory.useSslProtocol();
+            }
 
-			logger.debug("Try to acquire a connection ...");
-			connection = connectionFactory.newConnection();
-			channel = connection.createChannel();
-			channel.addShutdownListener(this);
+            logger.debug("Try to acquire a connection ...");
+            connection = connectionFactory.newConnection();
+            channel = connection.createChannel();
+            channel.addShutdownListener(this);
 
-			logger.debug("Topic creation '{}'...", exchangeName);
-			channel.exchangeDeclare(exchangeName, exchange);
-			shutdown = false;
-		    } catch (Exception e) {
-			String msg = "Unable to configure RabbitMQBroadcaster";
-			logger.error(msg, e);
-			throw new RuntimeException(msg, e);
-		    }
-		}
-	    }
-	}
+            logger.debug("Topic creation '{}'...", exchangeName);
+            channel.exchangeDeclare(exchangeName, exchange);
+        } catch (Exception e) {
+            String msg = "Unable to configure RabbitMQBroadcaster";
+            logger.error(msg, e);
+            throw new RuntimeException(msg, e);
+        }
     }
 
     public final static RabbitMQConnectionFactory getFactory(AtmosphereConfig config) {
@@ -155,9 +138,6 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
     }
 
     public Channel channel() {
-	if(shutdown){
-	    reInit();
-	}
         return channel;
     }
 
@@ -173,7 +153,6 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
 
     @Override
     public void shutdownCompleted(ShutdownSignalException cause) {
-	logger.info("Recieved shutdownCompleted", cause);
-	shutdown = true;
+        logger.info("Recieved shutdownCompleted", cause);
     }
 }
