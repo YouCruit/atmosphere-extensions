@@ -56,10 +56,10 @@ import be.olsson.bencoder.Bencoder;
  * @author Thibault Normand
  * @author Jean-Francois Arcand
  */
-public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook, ShutdownListener {
+public class RabbitMQNGConnectionFactory implements AtmosphereConfig.ShutdownHook, ShutdownListener {
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQNGBroadcaster.class);
 
-    private static RabbitMQConnectionFactory factory;
+    private static RabbitMQNGConnectionFactory factory;
 
     public static final String KEY_MESSAGE = "message";
     public static final String KEY_DESTINATION = "dest";
@@ -86,7 +86,7 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
 
     private final ConcurrentHashMap<Id, List<MessageConsumer>> listeners = new ConcurrentHashMap<>();
 
-    public RabbitMQConnectionFactory(AtmosphereConfig config) {
+    public RabbitMQNGConnectionFactory(AtmosphereConfig config) {
         bdecoder = new Bdecoder();
         bdecoder.setStringAsByteArray(true);
         String incomingRoutingKey = config.getInitParameter(PARAM_EXCHANGE_INCOMING_ROUTING_KEY, "to-atmosphere");
@@ -134,10 +134,10 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
         }
     }
 
-    synchronized static RabbitMQConnectionFactory getFactory(AtmosphereConfig config) {
+    synchronized static RabbitMQNGConnectionFactory getFactory(AtmosphereConfig config) {
         // No need to synchronize here as the first Broadcaster created is at startup.
         if (factory == null) {
-            factory = new RabbitMQConnectionFactory(config);
+            factory = new RabbitMQNGConnectionFactory(config);
         }
         return factory;
     }

@@ -37,7 +37,7 @@ public class RabbitMQNGBroadcaster extends SimpleBroadcaster implements MessageC
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQNGBroadcaster.class);
 
     private Id oldKey;
-    private RabbitMQConnectionFactory factory;
+    private RabbitMQNGConnectionFactory factory;
 
     public RabbitMQNGBroadcaster() {
     }
@@ -50,7 +50,7 @@ public class RabbitMQNGBroadcaster extends SimpleBroadcaster implements MessageC
     }
 
     public void init(AtmosphereConfig config) {
-        factory = RabbitMQConnectionFactory.getFactory(config);
+        factory = RabbitMQNGConnectionFactory.getFactory(config);
 
         restartConsumer();
     }
