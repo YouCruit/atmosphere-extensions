@@ -15,13 +15,7 @@
  */
 package org.atmosphere.plugin.rabbitmq;
 
-import com.rabbitmq.client.AMQP;
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.DefaultConsumer;
-import com.rabbitmq.client.Envelope;
-import com.rabbitmq.client.MessageProperties;
-import com.rabbitmq.client.ShutdownListener;
-import com.rabbitmq.client.ShutdownSignalException;
+import java.io.IOException;
 
 import org.atmosphere.cpr.AtmosphereConfig;
 import org.atmosphere.cpr.Broadcaster;
@@ -31,7 +25,8 @@ import org.atmosphere.util.SimpleBroadcaster;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.MessageProperties;
 
 /**
  * Simple {@link org.atmosphere.cpr.Broadcaster} implementation based on RabbitMQ
@@ -39,15 +34,12 @@ import java.io.IOException;
  * @author Thibault Normand
  * @author Jean-Francois Arcand
  */
-public class RabbitMQBroadcaster extends SimpleBroadcaster {
+public class RabbitMQBroadcaster extends SimpleBroadcaster implements MessageConsumer {
 
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQBroadcaster.class);
 
-    private String queueName;
-    private String consumerTag;
+    private String oldId;
     private RabbitMQConnectionFactory factory;
-    private Channel channel;
-    private String exchangeName;
 
     public RabbitMQBroadcaster() {
     }
@@ -59,11 +51,8 @@ public class RabbitMQBroadcaster extends SimpleBroadcaster {
         return this;
     }
 
-    public void init(AtmosphereConfig config) {
+    private void init(AtmosphereConfig config) {
         factory = RabbitMQConnectionFactory.getFactory(config);
-        channel = factory.channel();
-
-        exchangeName = factory.exchangeName();
         restartConsumer();
     }
 
@@ -94,72 +83,24 @@ public class RabbitMQBroadcaster extends SimpleBroadcaster {
         if (destroyed.get()) {
             return;
         }
-
-        outgoingBroadcast(entry.getMessage());
-    }
-
-    public void outgoingBroadcast(Object message) {
         try {
-            String id = getID();
-            logger.trace("Outgoing broadcast : {}", message);
-
-            channel.basicPublish(exchangeName, id,
-                    MessageProperties.PERSISTENT_TEXT_PLAIN, message.toString().getBytes());
-
-
+            factory.push(getID(), entry.getMessage().toString());
         } catch (IOException e) {
             logger.warn("Failed to send message over RabbitMQ", e);
         }
     }
 
-    void restartConsumer() {
+    private void restartConsumer() {
         try {
+            if (oldId != null) {
+                logger.debug("Unregister {}", oldId);
+                factory.deregisterListener(oldId, this);
+            }
+
             final String id = getID();
-
-            if (consumerTag != null) {
-                logger.debug("Delete consumer {}", consumerTag);
-                channel.basicCancel(consumerTag);
-                consumerTag = null;
-            }
-
-            if (queueName != null) {
-                logger.debug("Delete queue {}", queueName);
-                channel.queueUnbind(queueName, exchangeName, id);
-                channel.queueDelete(queueName);
-                queueName = null;
-            }
-
-            queueName = channel.queueDeclare().getQueue();
-            channel.queueBind(queueName, exchangeName, id);
-
-            logger.info("Create AMQP consumer on queue {}, for routing key {}", queueName, id);
-
-            DefaultConsumer queueConsumer = new DefaultConsumer(channel) {
-                @Override
-                public void handleDelivery(String consumerTag,
-                                           Envelope envelope,
-                                           AMQP.BasicProperties properties,
-                                           byte[] body)
-                        throws IOException {
-
-                    // Not for us.
-                    if (!envelope.getRoutingKey().equalsIgnoreCase(id)) return;
-
-                    String message = new String(body);
-                    try {
-                        Object newMsg = filter(message);
-                        // if newSgw == null, that means the message has been filtered.
-                        if (newMsg != null) {
-                            deliverPush(new Deliver(newMsg, new BroadcasterFuture<Object>(newMsg), message), true);
-                        }
-                    } catch (Throwable t) {
-                        logger.error("failed to push message: " + message, t);
-                    }
-                }
-            };
-
-            consumerTag = channel.basicConsume(queueName, true, queueConsumer);
-            logger.info("Consumer " + consumerTag + " for queue {}, on routing key {}", queueName, id);
+            logger.info("Registering for routing key {}", id);
+            factory.registerListener(id, this);
+            oldId = id;
 
         } catch (Throwable ex) {
             String msg = "Unable to initialize RabbitMQBroadcaster";
@@ -169,15 +110,15 @@ public class RabbitMQBroadcaster extends SimpleBroadcaster {
     }
 
     @Override
-    public synchronized void releaseExternalResources() {
+    public void consumeMessage(final String message) {
         try {
-            if (channel != null && channel.isOpen()) {
-                if (consumerTag != null) {
-                    channel.basicCancel(consumerTag);
-                }
+            Object newMsg = filter(message);
+            // if newSgw == null, that means the message has been filtered.
+            if (newMsg != null) {
+                deliverPush(new Deliver(newMsg, new BroadcasterFuture<Object>(newMsg), message), true);
             }
-        } catch (Exception ex) {
-            logger.trace("", ex);
+        } catch (Throwable t) {
+            logger.error("failed to push message: " + message, t);
         }
     }
 }
