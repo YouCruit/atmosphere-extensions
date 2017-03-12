@@ -48,52 +48,15 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
     public static final String PARAM_USE_SSL = RabbitMQBroadcaster.class.getName() + ".ssl";
 
     private String exchangeName;
-    private ConnectionFactory connectionFactory;
     private Connection connection;
     private Channel channel;
-    private String exchange;
-
-    private String host;
-    private String vhost;
-    private String user;
-    private String port;
-    private String password;
-    private boolean useSsl;
 
     public RabbitMQConnectionFactory(AtmosphereConfig config) {
 
-        exchange = config.getInitParameter(PARAM_EXCHANGE_TYPE, "topic");
+        String exchange = config.getInitParameter(PARAM_EXCHANGE_TYPE, "topic");
 
-        host = config.getInitParameter(PARAM_HOST);
-        if (host == null) {
-            host = "127.0.0.1";
-        }
+        boolean useSsl = config.getInitParameter(PARAM_USE_SSL, false);
 
-        vhost = config.getInitParameter(PARAM_VHOST);
-        if (vhost == null) {
-            vhost = "/";
-        }
-
-        user = config.getInitParameter(PARAM_USER);
-        if (user == null) {
-            user = "guest";
-        }
-
-        useSsl = Boolean.valueOf(config.getInitParameter(PARAM_USE_SSL, "false"));
-
-        port = config.getInitParameter(PARAM_PORT);
-        if (port == null) {
-            if (useSsl) {
-                port = "5671";
-            } else {
-                port = "5672";
-            }
-        }
-
-        password = config.getInitParameter(PARAM_PASS);
-        if (password == null) {
-            password = "guest";
-        }
 
 
         exchangeName = "atmosphere." + exchange;
@@ -101,12 +64,12 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
 
         try {
             logger.debug("Create Connection Factory");
-            connectionFactory = new ConnectionFactory();
-            connectionFactory.setUsername(user);
-            connectionFactory.setPassword(password);
-            connectionFactory.setVirtualHost(vhost);
-            connectionFactory.setHost(host);
-            connectionFactory.setPort(Integer.valueOf(port));
+            ConnectionFactory connectionFactory = new ConnectionFactory();
+            connectionFactory.setUsername(config.getInitParameter(PARAM_USER, "guest"));
+            connectionFactory.setPassword(config.getInitParameter(PARAM_PASS, "guest"));
+            connectionFactory.setVirtualHost(config.getInitParameter(PARAM_VHOST, "/"));
+            connectionFactory.setHost(config.getInitParameter(PARAM_HOST, "127.0.0.1"));
+            connectionFactory.setPort(config.getInitParameter(PARAM_PORT, useSsl ? 5671 : 5672));
             if (useSsl) {
                 connectionFactory.useSslProtocol();
             }
