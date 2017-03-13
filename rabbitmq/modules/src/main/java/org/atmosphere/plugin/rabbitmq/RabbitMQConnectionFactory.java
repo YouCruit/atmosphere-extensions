@@ -29,14 +29,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.rabbitmq.client.AMQP.BasicProperties;
-import com.rabbitmq.client.BuiltinExchangeType;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.DefaultConsumer;
 import com.rabbitmq.client.Envelope;
 import com.rabbitmq.client.MessageProperties;
-import com.rabbitmq.client.ShutdownListener;
 import com.rabbitmq.client.ShutdownSignalException;
 
 /**
@@ -114,8 +112,8 @@ public class RabbitMQConnectionFactory {
     private void deliver(final String routingKey, final byte[] body) {
         String message = new String(body);
         ConsumerData consumerData = listeners.getOrDefault(routingKey, EMPTY_CONSUMER_DATA);
-        for (MessageConsumer messageConsumer : consumerData.getListeners()) {
-            messageConsumer.consumeMessage(message);
+        if (consumerData.getListener() != null) {
+            consumerData.getListener().consumeMessage(message);
         }
     }
 
@@ -143,29 +141,27 @@ public class RabbitMQConnectionFactory {
 
     public synchronized void deregisterListener(final String id, final MessageConsumer messageConsumer) throws IOException {
         ConsumerData consumerData = listeners.getOrDefault(id, EMPTY_CONSUMER_DATA);
-        consumerData.removeListener(messageConsumer);
-
-        if (consumerData.hasNoConsumers()) {
-            String queueName = consumerData.getQueueName();
-            logger.debug("Delete queue {}", consumerData.getQueueName());
-            channel.queueUnbind(queueName, exchangeName, id);
-            channel.basicCancel(consumerData.getConsumerTag());
-            channel.queueDelete(queueName);
-        }
+        String queueName = consumerData.getQueueName();
+        logger.debug("Delete queue {}", consumerData.getQueueName());
+        channel.queueUnbind(queueName, exchangeName, id);
+        channel.basicCancel(consumerData.getConsumerTag());
+        channel.queueDelete(queueName);
     }
 
     public synchronized void registerListener(final String id, final MessageConsumer messageConsumer) {
-        ConsumerData consumerData = listeners.computeIfAbsent(id, this::createConsumerData);
-        // Trick to avoid having to synchronize accesses to the list
-        consumerData.addListener(messageConsumer);
+        if (listeners.containsKey(id)) {
+            throw new IllegalArgumentException("Really bad. REVERT!");
+	} else {
+	    listeners.put(id, createConsumerData(id, messageConsumer));
+	}
     }
 
-    private ConsumerData createConsumerData(final String id) {
+    private ConsumerData createConsumerData(final String id, final MessageConsumer messageConsumer) {
         try {
             String queueName = channel.queueDeclare().getQueue();
             channel.queueBind(queueName, exchangeName, id);
             String consumerTag = channel.basicConsume(queueName, true, consumer);
-            return new ConsumerData(queueName, consumerTag);
+            return new ConsumerData(messageConsumer, queueName, consumerTag);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
