@@ -7,7 +7,7 @@
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
-    <groupId>org.atmosphere</groupId>
+    <groupId>com.youcruit.org.atmosphere</groupId>
     <artifactId>atmosphere-extensions-project</artifactId>
     <packaging>pom</packaging>
     <name>atmosphere-extensions-project</name>
