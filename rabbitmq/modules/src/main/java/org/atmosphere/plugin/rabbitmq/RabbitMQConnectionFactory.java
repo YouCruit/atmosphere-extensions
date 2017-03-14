@@ -15,18 +15,27 @@
  */
 package org.atmosphere.plugin.rabbitmq;
 
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.Connection;
-import com.rabbitmq.client.ConnectionFactory;
-import com.rabbitmq.client.ShutdownListener;
-import com.rabbitmq.client.ShutdownSignalException;
+import static org.atmosphere.plugin.rabbitmq.ConsumerData.EMPTY_CONSUMER_DATA;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 
 import org.atmosphere.cpr.AtmosphereConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.concurrent.TimeoutException;
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.DefaultConsumer;
+import com.rabbitmq.client.Envelope;
+import com.rabbitmq.client.MessageProperties;
+import com.rabbitmq.client.ShutdownSignalException;
 
 /**
  * RabbitMQ Connection Factory.
@@ -34,7 +43,7 @@ import java.util.concurrent.TimeoutException;
  * @author Thibault Normand
  * @author Jean-Francois Arcand
  */
-public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook, ShutdownListener{
+public class RabbitMQConnectionFactory {
     private static final Logger logger = LoggerFactory.getLogger(RabbitMQBroadcaster.class);
 
     private static RabbitMQConnectionFactory factory;
@@ -48,101 +57,67 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
     public static final String PARAM_USE_SSL = RabbitMQBroadcaster.class.getName() + ".ssl";
 
     private String exchangeName;
-    private ConnectionFactory connectionFactory;
     private Connection connection;
     private Channel channel;
-    private String exchange;
-    private volatile boolean shutdown;
+    private DefaultConsumer consumer;
 
-    private String host;
-    private String vhost;
-    private String user;
-    private String port;
-    private String password;
-    private boolean useSsl;
+    private final ConcurrentHashMap<String, ConsumerData> listeners = new ConcurrentHashMap<>();
+
+    private volatile int threadStartCount = 1;
+    private ExecutorService executorService;
 
     public RabbitMQConnectionFactory(AtmosphereConfig config) {
 
-	shutdown = true;
-        String s = config.getInitParameter(PARAM_EXCHANGE_TYPE);
-        if (s != null) {
-            exchange = s;
-        } else {
-            exchange = "topic";
-        }
+        String exchange = config.getInitParameter(PARAM_EXCHANGE_TYPE, "topic");
 
-        host = config.getInitParameter(PARAM_HOST);
-        if (host == null) {
-            host = "127.0.0.1";
-        }
-
-        vhost = config.getInitParameter(PARAM_VHOST);
-        if (vhost == null) {
-            vhost = "/";
-        }
-
-        user = config.getInitParameter(PARAM_USER);
-        if (user == null) {
-            user = "guest";
-        }
-
-        useSsl = Boolean.valueOf(config.getInitParameter(PARAM_USE_SSL, "false"));
-
-        port = config.getInitParameter(PARAM_PORT);
-        if (port == null) {
-            if(useSsl){
-        	port = "5671";
-            }else{
-        	port = "5672";
-            }
-        }
-
-        password = config.getInitParameter(PARAM_PASS);
-        if (password == null) {
-            password = "guest";
-        }
-        
+        boolean useSsl = config.getInitParameter(PARAM_USE_SSL, false);
 
         exchangeName = "atmosphere." + exchange;
-        reInit();
-        config.shutdownHook(this);
+        config.shutdownHook(this::shutdown);
+
+        try {
+            logger.debug("Create Connection Factory");
+            ConnectionFactory connectionFactory = new ConnectionFactory();
+            connectionFactory.setUsername(config.getInitParameter(PARAM_USER, "guest"));
+            connectionFactory.setPassword(config.getInitParameter(PARAM_PASS, "guest"));
+            connectionFactory.setVirtualHost(config.getInitParameter(PARAM_VHOST, "/"));
+            connectionFactory.setHost(config.getInitParameter(PARAM_HOST, "127.0.0.1"));
+            connectionFactory.setPort(config.getInitParameter(PARAM_PORT, useSsl ? 5671 : 5672));
+            if (useSsl) {
+                connectionFactory.useSslProtocol();
+            }
+
+            logger.debug("Try to acquire a connection ...");
+            connection = connectionFactory.newConnection();
+            channel = connection.createChannel();
+            channel.addShutdownListener(this::shutdownCompleted);
+
+            logger.debug("Topic creation '{}'...", exchangeName);
+            channel.exchangeDeclare(exchangeName, exchange);
+
+            consumer = new DefaultConsumer(channel) {
+                @Override
+                public void handleDelivery(final String consumerTag, final Envelope envelope, final BasicProperties properties, final byte[] body) throws IOException {
+                    executorService.submit(() ->deliver(envelope.getRoutingKey(), body));
+                }
+            };
+            executorService = Executors.newCachedThreadPool((runnable) -> new Thread(runnable, getClass().getSimpleName() + " #" + threadStartCount++));
+        } catch (Exception e) {
+            String msg = "Unable to configure RabbitMQBroadcaster";
+            logger.error(msg, e);
+            throw new RuntimeException(msg, e);
+        }
     }
 
-    private void reInit() throws RuntimeException {
-	if(shutdown){
-	    synchronized(RabbitMQConnectionFactory.class){
-		if(shutdown){
-		    try {
-			logger.debug("Create Connection Factory");
-			connectionFactory = new ConnectionFactory();
-			connectionFactory.setUsername(user);
-			connectionFactory.setPassword(password);
-			connectionFactory.setVirtualHost(vhost);
-			connectionFactory.setHost(host);
-			connectionFactory.setPort(Integer.valueOf(port));
-			if(useSsl){
-			    connectionFactory.useSslProtocol();
-			}
-
-			logger.debug("Try to acquire a connection ...");
-			connection = connectionFactory.newConnection();
-			channel = connection.createChannel();
-			channel.addShutdownListener(this);
-
-			logger.debug("Topic creation '{}'...", exchangeName);
-			channel.exchangeDeclare(exchangeName, exchange);
-			shutdown = false;
-		    } catch (Exception e) {
-			String msg = "Unable to configure RabbitMQBroadcaster";
-			logger.error(msg, e);
-			throw new RuntimeException(msg, e);
-		    }
-		}
-	    }
-	}
+    private void deliver(final String routingKey, final byte[] body) {
+        String message = new String(body);
+        ConsumerData consumerData = listeners.getOrDefault(routingKey, EMPTY_CONSUMER_DATA);
+        if (consumerData.getListener() != null) {
+            consumerData.getListener().consumeMessage(message);
+        }
     }
 
-    public final static RabbitMQConnectionFactory getFactory(AtmosphereConfig config) {
+    static RabbitMQConnectionFactory getFactory(AtmosphereConfig config) {
         // No need to synchronize here as the first Broadcaster created is at startup.
         if (factory == null) {
             factory = new RabbitMQConnectionFactory(config);
@@ -150,20 +125,9 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
         return factory;
     }
 
-    public String exchangeName() {
-        return exchangeName;
-    }
-
-    public Channel channel() {
-	if(shutdown){
-	    reInit();
-	}
-        return channel;
-    }
-
-    @Override
-    public void shutdown() {
+    private void shutdown() {
         try {
+            executorService.shutdown();
             channel.close();
             connection.close();
         } catch (IOException | TimeoutException e) {
@@ -171,9 +135,42 @@ public class RabbitMQConnectionFactory implements AtmosphereConfig.ShutdownHook,
         }
     }
 
-    @Override
-    public void shutdownCompleted(ShutdownSignalException cause) {
-	logger.info("Recieved shutdownCompleted", cause);
-	shutdown = true;
+    private void shutdownCompleted(ShutdownSignalException cause) {
+        logger.info("Recieved shutdownCompleted", cause);
     }
+
+    public synchronized void deregisterListener(final String id, final MessageConsumer messageConsumer) throws IOException {
+        ConsumerData consumerData = listeners.getOrDefault(id, EMPTY_CONSUMER_DATA);
+        String queueName = consumerData.getQueueName();
+        logger.debug("Delete queue {}", consumerData.getQueueName());
+        channel.queueUnbind(queueName, exchangeName, id);
+        channel.basicCancel(consumerData.getConsumerTag());
+        channel.queueDelete(queueName);
+    }
+
+    public synchronized void registerListener(final String id, final MessageConsumer messageConsumer) {
+        if (listeners.containsKey(id)) {
+            throw new IllegalArgumentException("Really bad. REVERT!");
+	} else {
+	    listeners.put(id, createConsumerData(id, messageConsumer));
+	}
+    }
+
+    private ConsumerData createConsumerData(final String id, final MessageConsumer messageConsumer) {
+        try {
+            String queueName = channel.queueDeclare().getQueue();
+            channel.queueBind(queueName, exchangeName, id);
+            String consumerTag = channel.basicConsume(queueName, true, consumer);
+            return new ConsumerData(messageConsumer, queueName, consumerTag);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+    }
+
+    public void push(final String id, final String body) throws IOException {
+        channel.basicPublish(exchangeName, id, MessageProperties.PERSISTENT_TEXT_PLAIN, body.getBytes());
+    }
+
+
 }
